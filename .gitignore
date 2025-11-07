@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.python-version
+venv/
+.DS_Store
+ai_learning_data.json
+*.bin
