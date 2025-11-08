@@ -392,3 +392,215 @@ header h1 {
     flex-wrap: wrap;
   }
 }
+
+/* Кнопки в хедере */
+.header-buttons {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.btn-small {
+  padding: 10px 20px;
+  font-size: 14px;
+}
+
+/* Модальные окна */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(5px);
+  animation: fadeIn 0.3s;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-content {
+  background: white;
+  border-radius: 20px;
+  max-width: 600px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: slideUp 0.3s;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 25px 30px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.modal-header h2 {
+  font-size: 24px;
+  color: #2c3e50;
+  margin: 0;
+}
+
+.modal-close {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: #f0f0f0;
+  font-size: 28px;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  background: #e74c3c;
+  color: white;
+  transform: rotate(90deg);
+}
+
+.modal-body {
+  padding: 30px;
+}
+
+/* Правила */
+.rule-item {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 25px;
+}
+
+.rule-number {
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.rule-text h4 {
+  font-size: 16px;
+  color: #2c3e50;
+  margin-bottom: 8px;
+}
+
+.rule-text p {
+  font-size: 14px;
+  color: #666;
+  line-height: 1.6;
+}
+
+/* Статистика в модальном окне */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 15px;
+  margin-bottom: 30px;
+}
+
+.stat-card-modal {
+  background: #f8f9fa;
+  border-radius: 15px;
+  padding: 25px;
+  text-align: center;
+  transition: all 0.3s;
+}
+
+.stat-card-modal:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+.stat-card-modal .stat-icon {
+  font-size: 40px;
+  margin-bottom: 10px;
+}
+
+.stat-card-modal .stat-value {
+  font-size: 36px;
+  font-weight: bold;
+  color: #2c3e50;
+  margin-bottom: 5px;
+}
+
+.stat-card-modal .stat-label {
+  font-size: 14px;
+  color: #7f8c8d;
+}
+
+.win-rate {
+  background: #f8f9fa;
+  padding: 25px;
+  border-radius: 15px;
+}
+
+.win-rate h3 {
+  font-size: 18px;
+  color: #2c3e50;
+  margin-bottom: 15px;
+  text-align: center;
+}
+
+.win-rate-bar {
+  height: 30px;
+  background: #ecf0f1;
+  border-radius: 15px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.win-rate-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #27ae60, #2ecc71);
+  transition: width 0.5s ease;
+  border-radius: 15px;
+}
+
+.win-rate p {
+  text-align: center;
+  font-size: 24px;
+  font-weight: bold;
+  color: #27ae60;
+}
+
+@media (max-width: 768px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .header-buttons {
+    flex-direction: column;
+  }
+}

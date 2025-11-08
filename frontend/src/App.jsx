@@ -2,23 +2,31 @@ import { useState, useEffect, useRef } from 'react'
 import './App.css'
 
 function App() {
-  const [clientId] = useState(() => 
-    'player_' + Math.random().toString(36).substr(2, 9)
-  )
-  
+  const [clientId] = useState(() => 'player_' + Math.random().toString(36).substr(2, 9))
   const [gameMode, setGameMode] = useState(null)
   const [gameId, setGameId] = useState(null)
   const [gameStatus, setGameStatus] = useState('menu')
-  
   const [inputWord, setInputWord] = useState('')
   const [guessHistory, setGuessHistory] = useState([])
   const [attempts, setAttempts] = useState(0)
   const [message, setMessage] = useState('')
   const [targetWord, setTargetWord] = useState('')
-  
   const [opponentId, setOpponentId] = useState(null)
   const [opponentAttempts, setOpponentAttempts] = useState(0)
   const [opponentLastWord, setOpponentLastWord] = useState('')
+  
+  const [showRules, setShowRules] = useState(false)
+  const [showStats, setShowStats] = useState(false)
+  
+  const [stats, setStats] = useState(() => {
+    const saved = localStorage.getItem('wordweave_stats')
+    return saved ? JSON.parse(saved) : {
+      totalGames: 0,
+      totalWins: 0,
+      totalAttempts: 0,
+      bestScore: null
+    }
+  })
   
   const ws = useRef(null)
 
@@ -48,13 +56,11 @@ function App() {
           setOpponentId(data.opponent)
           setMessage('⚔️ Соперник найден! Кто быстрее угадает слово.')
         }
-      }
-      
+      } 
       else if (data.type === 'waiting_for_opponent') {
         setGameStatus('waiting')
         setMessage('⏳ Поиск соперника...')
       }
-      
       else if (data.type === 'guess_result') {
         setGuessHistory(data.history)
         setAttempts(data.attempts)
@@ -63,6 +69,7 @@ function App() {
           setGameStatus('finished')
           setTargetWord(data.word)
           setMessage(`🎉 Победа! Вы угадали слово "${data.word}" за ${data.attempts} попыток!`)
+          updateStatsFunc(true, data.attempts)
         } else {
           const rankText = data.rank < 100 ? `очень близко (ранг ${data.rank})` :
                           data.rank < 500 ? `близко (ранг ${data.rank})` :
@@ -70,22 +77,22 @@ function App() {
           setMessage(`"${data.word}" - ${rankText}`)
         }
       }
-      
       else if (data.type === 'opponent_guess') {
         setOpponentAttempts(data.attempts)
         setOpponentLastWord(data.last_word || '')
       }
-      
       else if (data.type === 'game_over') {
         setGameStatus('finished')
         setTargetWord(data.word)
+        
         if (data.winner === clientId) {
           setMessage(`🎉 Победа! Слово: "${data.word}"`)
+          updateStatsFunc(true, attempts)
         } else {
           setMessage(`😔 Соперник победил. Слово было: "${data.word}"`)
+          updateStatsFunc(false, attempts)
         }
       }
-      
       else if (data.type === 'error') {
         setMessage('❌ ' + data.message)
       }
@@ -99,24 +106,38 @@ function App() {
     ws.current.onclose = () => {
       console.log('🔌 Соединение закрыто')
     }
-
+    
     return () => {
       if (ws.current) {
         ws.current.close()
       }
     }
-  }, [clientId])
+  }, [clientId, attempts])
+
+  const updateStatsFunc = (isWin, attemptCount) => {
+    const newStats = {
+      totalGames: stats.totalGames + 1,
+      totalWins: isWin ? stats.totalWins + 1 : stats.totalWins,
+      totalAttempts: stats.totalAttempts + attemptCount,
+      bestScore: !stats.bestScore || (isWin && attemptCount < stats.bestScore) 
+        ? attemptCount 
+        : stats.bestScore
+    }
+    setStats(newStats)
+    localStorage.setItem('wordweave_stats', JSON.stringify(newStats))
+  }
 
   const startGame = (mode) => {
     console.log(`🎮 Начинаем игру в режиме: ${mode}`)
-    ws.current.send(JSON.stringify({
-      action: mode === 'solo' ? 'start_solo' : 'start_multiplayer'
-    }))
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({
+        action: mode === 'solo' ? 'start_solo' : 'start_multiplayer'
+      }))
+    }
   }
 
   const makeGuess = () => {
     const word = inputWord.trim()
-    
     if (!word) {
       setMessage('⚠️ Введите слово')
       return
@@ -130,12 +151,13 @@ function App() {
     }
     
     console.log(`📤 Отправляем попытку: ${word}`)
-    ws.current.send(JSON.stringify({
-      action: 'guess',
-      game_id: gameId,
-      word: word
-    }))
-    
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({
+        action: 'guess',
+        game_id: gameId,
+        word: word
+      }))
+    }
     setInputWord('')
   }
 
@@ -167,39 +189,37 @@ function App() {
   return (
     <div className="App">
       <header>
-        <h1>🎯 Игра в Слова</h1>
-        <p className="subtitle">Угадайте загаданное слово по семантической близости</p>
+        <h1>🎮 WORDWEAVE</h1>
+        <p className="subtitle">Угадай слово через семантические ассоциации</p>
+        
+        <div className="header-buttons">
+          <button className="btn btn-outline btn-small" onClick={() => setShowRules(true)}>
+            📖 Правила
+          </button>
+          <button className="btn btn-outline btn-small" onClick={() => setShowStats(true)}>
+            📊 Статистика
+          </button>
+        </div>
       </header>
 
       {gameStatus === 'menu' && (
         <div className="menu">
           <h2>Выберите режим игры</h2>
           <div className="menu-buttons">
-            <button onClick={() => startGame('solo')} className="btn btn-primary">
-              <span className="btn-icon">🎮</span>
-              <span className="btn-text">
-                <strong>Соло режим</strong>
+            <button className="btn btn-primary" onClick={() => startGame('solo')}>
+              <div className="btn-icon">👤</div>
+              <div className="btn-text">
+                <strong>Одиночная игра</strong>
                 <small>Играйте в своем темпе</small>
-              </span>
+              </div>
             </button>
-            <button onClick={() => startGame('multiplayer')} className="btn btn-secondary">
-              <span className="btn-icon">⚔️</span>
-              <span className="btn-text">
-                <strong>С соперником</strong>
-                <small>Кто быстрее угадает</small>
-              </span>
+            <button className="btn btn-primary" onClick={() => startGame('multiplayer')}>
+              <div className="btn-icon">⚔️</div>
+              <div className="btn-text">
+                <strong>Мультиплеер</strong>
+                <small>Соревнуйтесь с другими</small>
+              </div>
             </button>
-          </div>
-          
-          <div className="rules">
-            <h3>📖 Как играть:</h3>
-            <ul>
-              <li>Введите любое существительное - система покажет насколько оно близко к загаданному</li>
-              <li>Чем меньше ранг (число), тем ближе к ответу</li>
-              <li>Используйте подсказки из истории попыток</li>
-              <li>Побеждает тот, кто угадает слово первым!</li>
-              <li>Вводите только существительные (названия предметов, животных, явлений)</li>
-            </ul>
           </div>
         </div>
       )}
@@ -207,8 +227,9 @@ function App() {
       {gameStatus === 'waiting' && (
         <div className="waiting">
           <div className="spinner"></div>
-          <h2>{message}</h2>
-          <button onClick={resetGame} className="btn btn-outline">
+          <h2>Поиск соперника...</h2>
+          <p>Ожидайте подключения другого игрока</p>
+          <button className="btn btn-secondary" onClick={resetGame}>
             Отмена
           </button>
         </div>
@@ -216,23 +237,22 @@ function App() {
 
       {gameStatus === 'playing' && (
         <div className="game">
-          <div className="message-bar">
-            {message}
-          </div>
-
+          <div className="message-bar">{message}</div>
+          
           <div className="stats">
             <div className="stat-card">
               <div className="stat-label">Ваши попытки</div>
               <div className="stat-value">{attempts}</div>
+              <div className="stat-hint">Продолжайте!</div>
             </div>
             
             {gameMode === 'multiplayer' && (
               <div className="stat-card opponent">
-                <div className="stat-label">Попытки соперника</div>
+                <div className="stat-label">Соперник</div>
                 <div className="stat-value">{opponentAttempts}</div>
-                {opponentLastWord && (
-                  <div className="stat-hint">последнее: {opponentLastWord}</div>
-                )}
+                <div className="stat-hint">
+                  {opponentLastWord ? `Последнее: ${opponentLastWord}` : 'Думает...'}
+                </div>
               </div>
             )}
           </div>
@@ -240,24 +260,28 @@ function App() {
           <div className="input-area">
             <input
               type="text"
+              className="word-input"
               value={inputWord}
               onChange={(e) => setInputWord(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Введите существительное..."
+              placeholder="Введите слово..."
               autoFocus
-              className="word-input"
             />
-            <button onClick={makeGuess} className="btn btn-primary">
-              Проверить
+            <button className="btn btn-primary btn-large" onClick={makeGuess}>
+              Проверить →
             </button>
           </div>
 
-          {guessHistory.length > 0 && (
-            <div className="history">
-              <h3>📝 История попыток (отсортировано по близости):</h3>
-              <div className="history-list">
-                {guessHistory.map((guess, idx) => (
-                  <div key={idx} className="guess-item">
+          <div className="history">
+            <h3>История попыток (сортировано по близости)</h3>
+            <div className="history-list">
+              {guessHistory.length === 0 ? (
+                <p style={{textAlign: 'center', color: '#999', padding: '20px'}}>
+                  Ваши попытки появятся здесь
+                </p>
+              ) : (
+                guessHistory.map((guess, index) => (
+                  <div key={index} className="guess-item">
                     <div className="guess-rank" style={{color: getRankColor(guess.rank)}}>
                       #{guess.rank}
                     </div>
@@ -268,43 +292,137 @@ function App() {
                           className="similarity-fill"
                           style={{
                             width: `${guess.similarity * 100}%`,
-                            backgroundColor: getRankColor(guess.rank)
+                            background: `linear-gradient(90deg, ${getRankColor(guess.rank)}, ${getRankColor(guess.rank)}99)`
                           }}
                         ></div>
                       </div>
-                      <span className="similarity-value">
+                      <div className="similarity-value">
                         {(guess.similarity * 100).toFixed(1)}%
-                      </span>
+                      </div>
                     </div>
                   </div>
-                ))}
-              </div>
+                ))
+              )}
             </div>
-          )}
+          </div>
+          
+          <button className="btn btn-secondary" onClick={resetGame} style={{marginTop: '20px'}}>
+            Вернуться в меню
+          </button>
         </div>
       )}
 
       {gameStatus === 'finished' && (
         <div className="finished">
           <div className="result-message">
-            <h2>{message}</h2>
-            {targetWord && (
-              <div className="target-word">
-                Загаданное слово: <strong>{targetWord}</strong>
-              </div>
-            )}
+            <h2>{message.includes('Победа') ? '🎉 Поздравляем!' : '😔 Игра окончена'}</h2>
           </div>
-          
+          <div className="target-word">
+            Загаданное слово: <strong>{targetWord}</strong>
+          </div>
           <div className="final-stats">
             <div className="final-stat">
-              <div className="final-stat-label">Всего попыток</div>
+              <div className="final-stat-label">Попыток</div>
               <div className="final-stat-value">{attempts}</div>
             </div>
+            <div className="final-stat">
+              <div className="final-stat-label">Слов проверено</div>
+              <div className="final-stat-value">{guessHistory.length}</div>
+            </div>
           </div>
-
-          <button onClick={resetGame} className="btn btn-primary btn-large">
-            🎮 Играть снова
+          <button className="btn btn-primary btn-large" onClick={resetGame}>
+            Играть снова
           </button>
+        </div>
+      )}
+
+      {showRules && (
+        <div className="modal" onClick={() => setShowRules(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>📖 Правила игры</h2>
+              <button className="modal-close" onClick={() => setShowRules(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div className="rule-item">
+                <div className="rule-number">1</div>
+                <div className="rule-text">
+                  <h4>Цель игры</h4>
+                  <p>Угадайте загаданное слово через семантические ассоциации</p>
+                </div>
+              </div>
+              <div className="rule-item">
+                <div className="rule-number">2</div>
+                <div className="rule-text">
+                  <h4>Как играть</h4>
+                  <p>Вводите слова, и система покажет насколько они близки к загаданному</p>
+                </div>
+              </div>
+              <div className="rule-item">
+                <div className="rule-number">3</div>
+                <div className="rule-text">
+                  <h4>Ранг близости</h4>
+                  <p>Чем меньше ранг — тем ближе слово. Ранг 1-10 означает очень близкое слово!</p>
+                </div>
+              </div>
+              <div className="rule-item">
+                <div className="rule-number">4</div>
+                <div className="rule-text">
+                  <h4>AI обучается</h4>
+                  <p>С каждой игрой искусственный интеллект становится умнее</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showStats && (
+        <div className="modal" onClick={() => setShowStats(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>📊 Статистика</h2>
+              <button className="modal-close" onClick={() => setShowStats(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div className="stats-grid">
+                <div className="stat-card-modal">
+                  <div className="stat-icon">🎯</div>
+                  <div className="stat-value">{stats.totalGames}</div>
+                  <div className="stat-label">Всего игр</div>
+                </div>
+                <div className="stat-card-modal">
+                  <div className="stat-icon">🏆</div>
+                  <div className="stat-value">{stats.totalWins}</div>
+                  <div className="stat-label">Побед</div>
+                </div>
+                <div className="stat-card-modal">
+                  <div className="stat-icon">📈</div>
+                  <div className="stat-value">
+                    {stats.totalGames > 0 ? Math.round(stats.totalAttempts / stats.totalGames) : 0}
+                  </div>
+                  <div className="stat-label">Средних попыток</div>
+                </div>
+                <div className="stat-card-modal">
+                  <div className="stat-icon">⚡</div>
+                  <div className="stat-value">{stats.bestScore || '-'}</div>
+                  <div className="stat-label">Лучший результат</div>
+                </div>
+              </div>
+              <div className="win-rate">
+                <h3>Процент побед</h3>
+                <div className="win-rate-bar">
+                  <div 
+                    className="win-rate-fill" 
+                    style={{
+                      width: `${stats.totalGames > 0 ? (stats.totalWins / stats.totalGames * 100) : 0}%`
+                    }}
+                  ></div>
+                </div>
+                <p>{stats.totalGames > 0 ? ((stats.totalWins / stats.totalGames * 100).toFixed(1)) : 0}%</p>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
