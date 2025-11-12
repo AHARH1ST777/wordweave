@@ -18,17 +18,41 @@ function App() {
   const [showRules, setShowRules] = useState(false)
   const [showStats, setShowStats] = useState(false)
   
+  // Таймер времени на сайте
+  const [totalTimeSpent, setTotalTimeSpent] = useState(() => {
+    const saved = localStorage.getItem('wordweave_total_time')
+    return saved ? parseInt(saved) : 0
+  })
+  
   const [stats, setStats] = useState(() => {
     const saved = localStorage.getItem('wordweave_stats')
     return saved ? JSON.parse(saved) : {
       totalGames: 0,
       totalWins: 0,
       totalAttempts: 0,
-      bestScore: null
+      bestScore: null,
+      totalPlayTime: 0
     }
   })
   
   const ws = useRef(null)
+  const sessionStartTime = useRef(Date.now())
+  const timeInterval = useRef(null)
+
+  // Таймер времени на сайте
+  useEffect(() => {
+    timeInterval.current = setInterval(() => {
+      const newTime = totalTimeSpent + 1
+      setTotalTimeSpent(newTime)
+      localStorage.setItem('wordweave_total_time', newTime.toString())
+    }, 1000) // Каждую секунду
+    
+    return () => {
+      if (timeInterval.current) {
+        clearInterval(timeInterval.current)
+      }
+    }
+  }, [totalTimeSpent])
 
   useEffect(() => {
     console.log('🔌 Подключение к серверу...')
@@ -49,6 +73,7 @@ function App() {
         setGuessHistory([])
         setAttempts(0)
         setOpponentAttempts(0)
+        sessionStartTime.current = Date.now()
         
         if (data.mode === 'solo') {
           setMessage('🎮 Игра началась! Угадайте слово.')
@@ -62,17 +87,24 @@ function App() {
         setMessage('⏳ Поиск соперника...')
       }
       else if (data.type === 'guess_result') {
-        setGuessHistory(data.history)
-        setAttempts(data.attempts)
+        if (data.error) {
+          setMessage('❌ ' + data.error)
+          return
+        }
+        
+        setGuessHistory(data.history || [])
+        setAttempts(data.attempts || attempts)
         
         if (data.is_correct) {
           setGameStatus('finished')
-          setTargetWord(data.word)
-          setMessage(`🎉 Победа! Вы угадали слово "${data.word}" за ${data.attempts} попыток!`)
-          updateStatsFunc(true, data.attempts)
+          setTargetWord(data.target_word)
+          const gameTime = Math.floor((Date.now() - sessionStartTime.current) / 1000)
+          setMessage(`🎉 Победа! Вы угадали слово "${data.target_word}" за ${data.attempts} попыток!`)
+          updateStatsFunc(true, data.attempts, gameTime)
         } else {
           const rankText = data.rank < 100 ? `очень близко (ранг ${data.rank})` :
                           data.rank < 500 ? `близко (ранг ${data.rank})` :
+                          data.rank < 1000 ? `средне (ранг ${data.rank})` :
                           `далеко (ранг ${data.rank})`
           setMessage(`"${data.word}" - ${rankText}`)
         }
@@ -84,13 +116,14 @@ function App() {
       else if (data.type === 'game_over') {
         setGameStatus('finished')
         setTargetWord(data.word)
+        const gameTime = Math.floor((Date.now() - sessionStartTime.current) / 1000)
         
         if (data.winner === clientId) {
           setMessage(`🎉 Победа! Слово: "${data.word}"`)
-          updateStatsFunc(true, attempts)
+          updateStatsFunc(true, attempts, gameTime)
         } else {
           setMessage(`😔 Соперник победил. Слово было: "${data.word}"`)
-          updateStatsFunc(false, attempts)
+          updateStatsFunc(false, attempts, gameTime)
         }
       }
       else if (data.type === 'error') {
@@ -112,17 +145,22 @@ function App() {
         ws.current.close()
       }
     }
-  }, [clientId, attempts])
+  }, [clientId])
 
-  const updateStatsFunc = (isWin, attemptCount) => {
+  const updateStatsFunc = (isWin, attemptCount, gameTime) => {
+    console.log('📊 Обновление статистики:', { isWin, attemptCount, gameTime })
+    
     const newStats = {
       totalGames: stats.totalGames + 1,
       totalWins: isWin ? stats.totalWins + 1 : stats.totalWins,
       totalAttempts: stats.totalAttempts + attemptCount,
+      totalPlayTime: stats.totalPlayTime + gameTime,
       bestScore: !stats.bestScore || (isWin && attemptCount < stats.bestScore) 
         ? attemptCount 
         : stats.bestScore
     }
+    
+    console.log('✓ Новая статистика:', newStats)
     setStats(newStats)
     localStorage.setItem('wordweave_stats', JSON.stringify(newStats))
   }
@@ -184,6 +222,20 @@ function App() {
     if (rank <= 50) return '#f39c12'
     if (rank <= 200) return '#e67e22'
     return '#e74c3c'
+  }
+
+  const formatTime = (seconds) => {
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    const secs = seconds % 60
+    
+    if (hours > 0) {
+      return `${hours}ч ${minutes}м`
+    } else if (minutes > 0) {
+      return `${minutes}м ${secs}с`
+    } else {
+      return `${secs}с`
+    }
   }
 
   return (
@@ -368,8 +420,8 @@ function App() {
               <div className="rule-item">
                 <div className="rule-number">4</div>
                 <div className="rule-text">
-                  <h4>AI обучается</h4>
-                  <p>С каждой игрой искусственный интеллект становится умнее</p>
+                  <h4>База слов</h4>
+                  <p>В игре 450,000+ русских существительных из проверенных словарей</p>
                 </div>
               </div>
             </div>
@@ -409,6 +461,22 @@ function App() {
                   <div className="stat-label">Лучший результат</div>
                 </div>
               </div>
+
+              {/* НОВАЯ СЕКЦИЯ: Время на сайте */}
+              <div className="time-section">
+                <h3>⏱️ Время на сайте</h3>
+                <div className="time-display">
+                  <div className="time-value">{formatTime(totalTimeSpent)}</div>
+                  <div className="time-label">Всего времени</div>
+                </div>
+                {stats.totalPlayTime > 0 && (
+                  <div className="time-display">
+                    <div className="time-value">{formatTime(stats.totalPlayTime)}</div>
+                    <div className="time-label">Время в играх</div>
+                  </div>
+                )}
+              </div>
+
               <div className="win-rate">
                 <h3>Процент побед</h3>
                 <div className="win-rate-bar">

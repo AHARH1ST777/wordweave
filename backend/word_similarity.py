@@ -1,161 +1,180 @@
 import gensim
 from gensim.models import KeyedVectors
 import os
+import json
 from difflib import SequenceMatcher
-from word_categories import WORD_CATEGORIES
 
 class WordSimilarityEngine:
-    def __init__(self):
-        """Инициализация движка"""
+    def __init__(self, database_path='word_database.json', ai_system=None):
+        """Инициализация с AI системой"""
         self.model = None
+        self.word_database = {}
+        self.ai_system = ai_system
+        
+        self.load_database(database_path)
         self.load_model()
-        self.word_categories = WORD_CATEGORIES
+    
+    def load_database(self, database_path):
+        """Загружает базу слов"""
+        if os.path.exists(database_path):
+            print(f"📖 Загрузка базы слов...")
+            with open(database_path, 'r', encoding='utf-8') as f:
+                self.word_database = json.load(f)
+            print(f"✓ Загружено {len(self.word_database)} слов")
+        else:
+            print(f"⚠️ База слов не найдена")
     
     def load_model(self):
-        """Загрузка модели"""
+        """Загружает Word2Vec модель"""
         model_path = "ruscorpora_upos_skipgram_300_2_2019.bin"
         
         if os.path.exists(model_path):
             try:
-                print("Загрузка модели... (может занять 1-2 минуты)")
+                print("📦 Загрузка Word2Vec модели...")
                 self.model = KeyedVectors.load_word2vec_format(
-                    model_path, 
+                    model_path,
                     binary=True
                 )
-                print("✓ Модель загружена успешно!")
+                print("✓ Word2Vec модель загружена!")
             except Exception as e:
-                print(f"❌ Ошибка загрузки модели: {e}")
+                print(f"⚠️ Ошибка загрузки модели: {e}")
                 self.model = None
         else:
-            print("⚠ Модель не найдена, используется режим с категориями")
+            print("⚠️ Word2Vec модель не найдена")
             self.model = None
     
     def normalize_word(self, word: str) -> str:
-        """Нормализация слова"""
-        return word.lower().strip()
-    
-    def string_similarity(self, a: str, b: str) -> float:
-        """Фонетическая похожесть"""
-        return SequenceMatcher(None, a, b).ratio()
+        """Нормализация слова с заменой ё → е"""
+        word = word.lower().strip()
+        word = word.replace('ё', 'е')
+        return word
     
     def validate_word(self, word: str) -> dict:
-        """Проверка валидности"""
-        word = self.normalize_word(word)
+        """Проверяет валидность слова с поддержкой ё/е"""
+        word_normalized = self.normalize_word(word)
         
-        if not word:
-            return {"valid": False, "message": "Слово не может быть пустым"}
+        if not word_normalized:
+            return {"valid": False, "message": "Пустое слово"}
         
-        if not self.model:
-            return {"valid": True, "message": "OK"}
+        if word_normalized in self.word_database:
+            return {"valid": True, "word": word_normalized}
         
-        word_noun = f"{word}_NOUN"
+        word_original = word.lower().strip()
+        if word_original in self.word_database:
+            return {"valid": True, "word": word_original}
         
-        if word_noun not in self.model:
-            found = False
-            for form in [f"{word}_NOUN", f"{word}_VERB", f"{word}_ADJ", f"{word}_ADV"]:
-                if form in self.model:
-                    found = True
-                    break
-            
-            if not found:
-                return {"valid": False, "message": f"Слово '{word}' не найдено"}
-            else:
-                return {"valid": False, "message": f"'{word}' - пожалуйста вводите существительные"}
-        
-        return {"valid": True, "message": "OK"}
+        return {
+            "valid": False,
+            "message": f"Слово '{word}' не найдено в словаре"
+        }
     
-    def get_category_similarity(self, word: str, target: str) -> float:
-        """Похожесть через категории"""
+    def get_synonyms(self, word: str, top_n: int = 20) -> list:
+        """Получает синонимы через Word2Vec"""
+        if not self.model:
+            return []
+        
         word = self.normalize_word(word)
-        target = self.normalize_word(target)
         
-        if target in self.word_categories:
-            if word in self.word_categories[target]:
-                return 0.65
-        
-        if word in self.word_categories:
-            if target in self.word_categories[word]:
-                return 0.5
-        
-        return None
+        try:
+            variants = [f"{word}_NOUN", f"{word}_ADJ", word]
+            
+            for variant in variants:
+                if variant in self.model:
+                    similar = self.model.most_similar(variant, topn=top_n)
+                    synonyms = []
+                    for w, score in similar:
+                        clean_word = self.normalize_word(w.split('_')[0])
+                        if clean_word in self.word_database and score > 0.4:
+                            synonyms.append((clean_word, score))
+                    return synonyms
+            
+            return []
+        except Exception as e:
+            return []
     
     def get_similarity(self, word1: str, word2: str) -> float:
-        """Комбинированная похожесть"""
+        """Вычисляет похожесть с уменьшенным весом AI"""
         word1 = self.normalize_word(word1)
         word2 = self.normalize_word(word2)
         
         if word1 == word2:
             return 1.0
         
-        category_sim = self.get_category_similarity(word1, word2)
+        similarities = []
         
-        if not self.model:
-            if category_sim is not None:
-                return category_sim
-            phon_sim = self.string_similarity(word1, word2)
-            if phon_sim > 0.5:
-                return phon_sim * 0.4
-            return 0.0
+        # 1. AI обучение (15% веса)
+        if self.ai_system:
+            ai_sim = self.ai_system.get_learned_similarity(word1, word2)
+            if ai_sim > 0:
+                similarities.append(('ai', ai_sim, 0.15))
         
-        try:
-            word1_tagged = f"{word1}_NOUN"
-            word2_tagged = f"{word2}_NOUN"
-            
-            model_sim = 0.0
-            if word1_tagged in self.model and word2_tagged in self.model:
-                model_sim = max(0.0, float(self.model.similarity(word1_tagged, word2_tagged)))
-            
-            if category_sim is not None:
-                return (model_sim * 0.7) + (category_sim * 0.3)
-            
-            return model_sim
-        except:
-            if category_sim is not None:
-                return category_sim
-            return 0.0
+        # 2. Word2Vec (70% веса)
+        if self.model:
+            try:
+                variants1 = [f"{word1}_NOUN", word1]
+                variants2 = [f"{word2}_NOUN", word2]
+                
+                for v1 in variants1:
+                    for v2 in variants2:
+                        if v1 in self.model and v2 in self.model:
+                            w2v_sim = float(self.model.similarity(v1, v2))
+                            similarities.append(('w2v', w2v_sim, 0.70))
+                            break
+                    if similarities and similarities[-1][0] == 'w2v':
+                        break
+            except:
+                pass
+        
+        # 3. Фонетическая (15% веса)
+        phonetic_sim = SequenceMatcher(None, word1, word2).ratio()
+        similarities.append(('phonetic', phonetic_sim, 0.15))
+        
+        if similarities:
+            total_weight = sum(w for _, _, w in similarities)
+            weighted_sum = sum(sim * w for _, sim, w in similarities)
+            final_similarity = weighted_sum / total_weight
+            return min(final_similarity, 1.0)
+        
+        return 0.0
     
-    def get_rank(self, word: str, target: str) -> int:
-        """Вычисляет ранг"""
-        word = self.normalize_word(word)
-        target = self.normalize_word(target)
+    def get_rank(self, guess_word: str, target_word: str) -> int:
+        """Вычисляет ранг БЕЗ AI (для одинакового ранга у всех)"""
+        guess_word = self.normalize_word(guess_word)
+        target_word = self.normalize_word(target_word)
         
-        if word == target:
+        if guess_word == target_word:
             return 0
         
-        category_sim = self.get_category_similarity(word, target)
-        if category_sim is not None:
-            rank = int(100 * (1 - category_sim)) // 5
-            return max(2, rank)
+        # Синонимы через Word2Vec
+        synonyms = self.get_synonyms(target_word, top_n=100)
+        for idx, (syn_word, score) in enumerate(synonyms):
+            if syn_word == guess_word:
+                rank = int(idx / score) + 1
+                return min(rank, 200)
         
-        if not self.model:
-            phon_sim = self.string_similarity(word, target)
-            if phon_sim > 0.5:
-                rank = int(200 * (1 - phon_sim))
-                return max(2, min(1000, rank))
-            return 9999
+        # По похожести
+        similarity = self.get_similarity(guess_word, target_word)
         
-        try:
-            target_tagged = f"{target}_NOUN"
-            word_tagged = f"{word}_NOUN"
-            
-            if target_tagged not in self.model:
-                phon_sim = self.string_similarity(word, target)
-                if phon_sim > 0.55:
-                    rank = int(150 * (1 - phon_sim))
-                    return max(2, min(500, rank))
-                return 9999
-            
-            similar_words = self.model.most_similar(target_tagged, topn=2000)
-            
-            rank = 0
-            for idx, (similar_word, _) in enumerate(similar_words):
-                similar_word_clean = similar_word.split('_')[0]
-                if similar_word_clean == target:
-                    continue
-                rank += 1
-                if similar_word_clean == word:
-                    return rank
-            
-            return 9999
-        except:
-            return 9999
+        if similarity >= 0.85:
+            return int((1 - similarity) * 200) + 10
+        elif similarity >= 0.70:
+            return int((1 - similarity) * 800) + 50
+        elif similarity >= 0.55:
+            return int((1 - similarity) * 2000) + 300
+        elif similarity >= 0.40:
+            return int((1 - similarity) * 5000) + 1200
+        elif similarity >= 0.25:
+            return int((1 - similarity) * 15000) + 4200
+        elif similarity >= 0.10:
+            return int((1 - similarity) * 30000) + 15700
+        else:
+            return int((1 - similarity) * 63000) + 36000
+    
+    def get_all_words(self) -> list:
+        """Возвращает все слова"""
+        return list(self.word_database.keys())
+    
+    def get_word_info(self, word: str) -> dict:
+        """Информация о слове"""
+        word = self.normalize_word(word)
+        return self.word_database.get(word, {})

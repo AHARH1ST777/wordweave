@@ -5,8 +5,9 @@ import uuid
 from typing import Dict
 from game_logic import GameSession, GameMode
 from word_similarity import WordSimilarityEngine
+from ai_learning import AILearningSystem
 
-app = FastAPI(title="Word Game API")
+app = FastAPI(title="WORDWEAVE API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -16,17 +17,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-print("🚀 Запуск сервера...")
-similarity_engine = WordSimilarityEngine()
-print("✓ Движок семантического поиска готов")
+print("🚀 Запуск сервера WORDWEAVE...")
+print("=" * 60)
 
-# ПРОВЕРКА при запуске
-print("=" * 50)
-if GameSession.validate_all_words():
-    print("✅ СИНХРОНИЗАЦИЯ OK - можно играть!")
-else:
-    print("❌ ЕСТЬ ПРОБЛЕМЫ - исправьте слова!")
-print("=" * 50)
+# Инициализация AI системы обучения
+try:
+    ai_system = AILearningSystem(data_file='ai_learning_data.json')
+    print("✓ AI система инициализирована")
+except Exception as e:
+    print(f"⚠️ Ошибка инициализации AI: {e}")
+    ai_system = None
+
+# Инициализация движка похожести с AI
+try:
+    similarity_engine = WordSimilarityEngine(
+        database_path='word_database.json',
+        ai_system=ai_system
+    )
+    print("✓ Движок похожести инициализирован")
+except Exception as e:
+    print(f"❌ Ошибка инициализации движка: {e}")
+    import sys
+    sys.exit(1)
+
+print("=" * 60)
+
+# Показываем статистику AI если доступна
+if ai_system:
+    try:
+        ai_stats = ai_system.get_stats()
+        print(f"🧠 AI Статистика:")
+        for key, value in ai_stats.items():
+            print(f"   - {key}: {value}")
+    except Exception as e:
+        print(f"⚠️ Не удалось получить статистику AI: {e}")
+
+print("=" * 60)
 
 active_games: Dict[str, GameSession] = {}
 waiting_players: Dict[str, WebSocket] = {}
@@ -38,29 +64,18 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket, client_id: str):
         await websocket.accept()
         self.active_connections[client_id] = websocket
-        print(f"✓ Игрок {client_id} подключился")
+        print(f"✓ Подключен: {client_id}")
     
     def disconnect(self, client_id: str):
         if client_id in self.active_connections:
             del self.active_connections[client_id]
-            print(f"✗ Игрок {client_id} отключился")
+            print(f"✗ Отключен: {client_id}")
     
-    async def send_message(self, message: dict, client_id: str):
+    async def send_personal_message(self, message: dict, client_id: str):
         if client_id in self.active_connections:
-            try:
-                await self.active_connections[client_id].send_json(message)
-            except Exception as e:
-                print(f"Ошибка отправки сообщения игроку {client_id}: {e}")
+            await self.active_connections[client_id].send_text(json.dumps(message))
 
 manager = ConnectionManager()
-
-@app.get("/")
-async def root():
-    return {"message": "Word Game API", "version": "1.0"}
-
-@app.get("/health")
-async def health():
-    return {"status": "ok", "active_games": len(active_games)}
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
@@ -68,10 +83,13 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     
     try:
         while True:
-            data = await websocket.receive_json()
-            action = data.get("action")
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            action = message.get('action')
             
-            if action == "start_solo":
+            print(f"📨 {client_id}: {action}")
+            
+            if action == 'start_solo':
                 game_id = str(uuid.uuid4())
                 game = GameSession(
                     game_id=game_id,
@@ -80,15 +98,14 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     players=[client_id]
                 )
                 active_games[game_id] = game
-                print(f"🎮 Соло игра {game_id} начата. Слово: {game.target_word}")
                 
-                await manager.send_message({
-                    "type": "game_started",
-                    "game_id": game_id,
-                    "mode": "solo"
+                await manager.send_personal_message({
+                    'type': 'game_started',
+                    'game_id': game_id,
+                    'mode': 'solo'
                 }, client_id)
             
-            elif action == "start_multiplayer":
+            elif action == 'start_multiplayer':
                 if waiting_players:
                     opponent_id = list(waiting_players.keys())[0]
                     opponent_ws = waiting_players.pop(opponent_id)
@@ -101,76 +118,128 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         players=[client_id, opponent_id]
                     )
                     active_games[game_id] = game
-                    print(f"🎮 Мультиплеер {game_id}: {client_id} vs {opponent_id}. Слово: {game.target_word}")
                     
-                    await manager.send_message({
-                        "type": "game_started",
-                        "game_id": game_id,
-                        "mode": "multiplayer",
-                        "opponent": opponent_id
+                    await manager.send_personal_message({
+                        'type': 'game_started',
+                        'game_id': game_id,
+                        'mode': 'multiplayer',
+                        'opponent': opponent_id
                     }, client_id)
                     
-                    await manager.send_message({
-                        "type": "game_started",
-                        "game_id": game_id,
-                        "mode": "multiplayer",
-                        "opponent": client_id
+                    await manager.send_personal_message({
+                        'type': 'game_started',
+                        'game_id': game_id,
+                        'mode': 'multiplayer',
+                        'opponent': client_id
                     }, opponent_id)
                 else:
                     waiting_players[client_id] = websocket
-                    print(f"⏳ Игрок {client_id} ждет соперника")
-                    await manager.send_message({"type": "waiting_for_opponent"}, client_id)
-            
-            elif action == "guess":
-                game_id = data.get("game_id")
-                word = data.get("word", "").lower().strip()
-                
-                if not word:
-                    await manager.send_message({"type": "error", "message": "Введите слово"}, client_id)
-                    continue
-                
-                if game_id not in active_games:
-                    await manager.send_message({"type": "error", "message": "Игра не найдена"}, client_id)
-                    continue
-                
-                game = active_games[game_id]
-                result = game.make_guess(client_id, word)
-                
-                # Проверяем, есть ли ошибка валидации
-                if "error" in result:
-                    await manager.send_message({
-                        "type": "error",
-                        "message": result["error"]
+                    await manager.send_personal_message({
+                        'type': 'waiting_for_opponent'
                     }, client_id)
-                    continue
+            
+            elif action == 'guess':
+                game_id = message.get('game_id')
+                word = message.get('word')
                 
-                print(f"   {client_id}: '{word}' → ранг {result['rank']}")
-                
-                await manager.send_message({"type": "guess_result", **result}, client_id)
-                
-                if game.mode == GameMode.MULTIPLAYER:
-                    opponent_id = game.get_opponent(client_id)
-                    if opponent_id:
-                        await manager.send_message({
-                            "type": "opponent_guess",
-                            "attempts": result["attempts"],
-                            "last_word": word
-                        }, opponent_id)
-                        
-                        if result["is_correct"]:
-                            print(f"🏆 {client_id} победил!")
-                            await manager.send_message({
-                                "type": "game_over",
-                                "winner": client_id,
-                                "word": game.target_word
-                            }, opponent_id)
+                if game_id in active_games:
+                    game = active_games[game_id]
+                    result = game.make_guess(client_id, word)
+                    
+                    await manager.send_personal_message({
+                        'type': 'guess_result',
+                        **result
+                    }, client_id)
+                    
+                    if game.mode == GameMode.MULTIPLAYER:
+                        opponent = game.get_opponent(client_id)
+                        if opponent:
+                            await manager.send_personal_message({
+                                'type': 'opponent_guess',
+                                'attempts': game.attempts[client_id],
+                                'last_word': word
+                            }, opponent)
+                    
+                    if result.get('is_correct'):
+                        if game.mode == GameMode.MULTIPLAYER:
+                            opponent = game.get_opponent(client_id)
+                            if opponent:
+                                await manager.send_personal_message({
+                                    'type': 'game_over',
+                                    'winner': client_id,
+                                    'word': game.target_word
+                                }, opponent)
+                else:
+                    await manager.send_personal_message({
+                        'type': 'error',
+                        'message': 'Игра не найдена'
+                    }, client_id)
     
     except WebSocketDisconnect:
         manager.disconnect(client_id)
         if client_id in waiting_players:
             del waiting_players[client_id]
 
+@app.get("/")
+async def root():
+    stats = {
+        "app": "WORDWEAVE",
+        "version": "2.0",
+        "words_count": len(similarity_engine.get_all_words()),
+        "status": "running"
+    }
+    
+    if ai_system:
+        try:
+            stats["ai_stats"] = ai_system.get_stats()
+        except:
+            stats["ai_stats"] = "unavailable"
+    
+    return stats
+
+@app.get("/api/stats")
+async def get_stats():
+    stats = {
+        "total_words": len(similarity_engine.get_all_words()),
+        "active_games": len(active_games),
+        "waiting_players": len(waiting_players)
+    }
+    
+    if ai_system:
+        try:
+            stats["ai"] = ai_system.get_stats()
+        except:
+            stats["ai"] = {"error": "AI stats unavailable"}
+    
+    return stats
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Сохраняем AI данные при остановке"""
+    print("💾 Сохранение AI данных...")
+    if ai_system:
+        try:
+            ai_system.save_data()
+            print("✓ AI данные сохранены")
+        except Exception as e:
+            print(f"⚠️ Ошибка сохранения: {e}")
+    print("✓ Сервер остановлен")
+
 if __name__ == "__main__":
     import uvicorn
-    print("🎮 Сервер запускается на http://localhost:8000")
+    print("\n" + "=" * 60)
+    print("✅ Сервер запущен!")
+    print("=" * 60)
+    print("🌐 Backend:  http://localhost:8000")
+    print("🎮 Frontend: http://localhost:5173")
+    print("📊 Слов в базе:", len(similarity_engine.get_all_words()))
+    
+    if ai_system:
+        try:
+            print("🧠 AI игр сыграно:", ai_system.games_played)
+        except:
+            print("🧠 AI: новая система")
+    
+    print("=" * 60 + "\n")
+    
     uvicorn.run(app, host="0.0.0.0", port=8000)

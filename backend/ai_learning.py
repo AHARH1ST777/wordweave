@@ -1,194 +1,184 @@
 """
-AI модуль, который учится из каждой игры и совершенствуется
+Система машинного обучения для WORDWEAVE
 """
 
 import json
 import os
-from typing import Dict, List, Tuple
-from collections import defaultdict
 from datetime import datetime
+from collections import defaultdict
+import math
 
-class AILearningEngine:
-    """Механизм обучения AI из игр"""
+class AILearningSystem:
+    def __init__(self, data_file='ai_learning_data.json'):
+        self.data_file = data_file
+        self.word_associations = {}
+        self.successful_paths = []
+        self.word_categories = defaultdict(set)
+        self.games_played = 0
+        self.total_guesses = 0
+        
+        self.load_data()
     
-    def __init__(self, learning_file: str = "backend/ai_learning_data.json"):
-        self.learning_file = learning_file
-        self.learning_data = self._load_learning_data()
-        self.game_statistics = self._load_statistics()
-    
-    def _load_learning_data(self) -> Dict:
-        """Загружает данные обучения"""
-        if os.path.exists(self.learning_file):
+    def load_data(self):
+        """Загружает обученные данные"""
+        if os.path.exists(self.data_file):
             try:
-                with open(self.learning_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except:
-                return self._initialize_learning_data()
-        return self._initialize_learning_data()
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.word_associations = data.get('associations', {})
+                    self.successful_paths = data.get('paths', [])
+                    
+                    categories_data = data.get('categories', {})
+                    self.word_categories = defaultdict(set)
+                    for k, v in categories_data.items():
+                        self.word_categories[k] = set(v) if isinstance(v, list) else set()
+                    
+                    self.games_played = data.get('games_played', 0)
+                    self.total_guesses = data.get('total_guesses', 0)
+                    print(f"✓ AI данные загружены: {self.games_played} игр, {len(self.word_associations)} связей")
+            except Exception as e:
+                print(f"⚠️ Ошибка загрузки AI данных: {e}")
+                self.word_categories = defaultdict(set)
+        else:
+            print("📝 Создана новая система обучения AI")
     
-    def _initialize_learning_data(self) -> Dict:
-        """Инициализирует пустые данные обучения"""
-        return {
-            "word_associations": {},  # Слово -> список слов которые часто угадывают
-            "patterns": {},  # Шаблоны - как люди угадывают
-            "difficulty_levels": {},  # Насколько сложно угадать слово
-            "games_played": 0,
-            "total_attempts": 0,
-            "average_attempts": 0,
-            "ai_improvements": []
-        }
-    
-    def _load_statistics(self) -> Dict:
-        """Загружает статистику"""
-        return {
-            "total_games": 0,
-            "successful_games": 0,
-            "average_win_rate": 0.0,
-            "hardest_words": [],
-            "easiest_words": []
-        }
-    
-    def record_game(self, target_word: str, guesses: List[Dict], winner: str = None, attempts: int = 0) -> Dict:
-        """Записывает прошедшую игру в память AI"""
-        
-        # Обновляем статистику слова
-        if target_word not in self.learning_data["word_associations"]:
-            self.learning_data["word_associations"][target_word] = {
-                "times_guessed": 0,
-                "related_words": defaultdict(int),
-                "average_attempts": 0,
-                "difficulty_score": 0.0
-            }
-        
-        word_data = self.learning_data["word_associations"][target_word]
-        
-        # Анализируем все попытки
-        for guess in guesses:
-            guessed_word = guess.get("word", "")
-            rank = guess.get("rank", 9999)
+    def save_data(self):
+        """Сохраняет обученные данные"""
+        try:
+            categories_serializable = {}
+            for key, value in self.word_categories.items():
+                if isinstance(value, set):
+                    categories_serializable[key] = list(value)
+                else:
+                    categories_serializable[key] = list(value) if hasattr(value, '__iter__') else []
             
-            # Если слово часто угадывают, увеличиваем связь
-            if rank <= 50:  # Близкие слова
-                word_data["related_words"][guessed_word] += 1
-        
-        # Обновляем попытки
-        word_data["times_guessed"] += 1
-        if attempts > 0:
-            word_data["average_attempts"] = (
-                (word_data["average_attempts"] * (word_data["times_guessed"] - 1) + attempts) 
-                / word_data["times_guessed"]
-            )
-        
-        # Вычисляем сложность (больше попыток = сложнее)
-        word_data["difficulty_score"] = word_data["average_attempts"] / 10.0
-        
-        # Обновляем общую статистику
-        self.learning_data["games_played"] += 1
-        self.learning_data["total_attempts"] += attempts if attempts > 0 else len(guesses)
-        self.learning_data["average_attempts"] = (
-            self.learning_data["total_attempts"] / self.learning_data["games_played"]
-        )
-        
-        if winner:
-            self.game_statistics["successful_games"] += 1
-        
-        self.game_statistics["total_games"] += 1
-        self.game_statistics["average_win_rate"] = (
-            self.game_statistics["successful_games"] / self.game_statistics["total_games"]
-        )
-        
-        # Сохраняем данные
-        self._save_learning_data()
-        
-        return {
-            "status": "recorded",
-            "word": target_word,
-            "attempts": attempts,
-            "difficulty": word_data["difficulty_score"]
-        }
+            data = {
+                'associations': self.word_associations,
+                'paths': self.successful_paths[-1000:],
+                'categories': categories_serializable,
+                'games_played': self.games_played,
+                'total_guesses': self.total_guesses,
+                'last_update': datetime.now().isoformat()
+            }
+            
+            with open(self.data_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            print(f"✓ AI данные сохранены")
+        except Exception as e:
+            print(f"❌ Ошибка сохранения AI данных: {e}")
+            import traceback
+            traceback.print_exc()
     
-    def get_ai_suggestions(self, target_word: str, current_guesses: List[str] = None) -> List[Tuple[str, float]]:
-        """Возвращает AI рекомендации на основе обучения"""
-        current_guesses = current_guesses or []
+    def learn_from_guess(self, guess_word, target_word, similarity, rank, is_correct):
+        """Обучается на каждой попытке"""
+        try:
+            guess_word = guess_word.lower()
+            target_word = target_word.lower()
+            
+            if target_word not in self.word_associations:
+                self.word_associations[target_word] = {}
+            
+            current_strength = self.word_associations[target_word].get(guess_word, 0)
+            
+            if is_correct:
+                new_strength = 1.0
+            else:
+                learning_rate = 0.1
+                rank_factor = 1.0 / (1 + math.log10(rank + 1))
+                new_strength = current_strength + learning_rate * rank_factor
+                new_strength = min(new_strength, 0.95)
+            
+            self.word_associations[target_word][guess_word] = new_strength
+            
+            if guess_word not in self.word_associations:
+                self.word_associations[guess_word] = {}
+            self.word_associations[guess_word][target_word] = new_strength * 0.8
+            
+            self.total_guesses += 1
         
-        if target_word not in self.learning_data["word_associations"]:
+        except Exception as e:
+            print(f"⚠️ Ошибка обучения на попытке: {e}")
+    
+    def learn_from_game(self, target_word, guess_history, attempts, won):
+        """Обучается на всей игре"""
+        try:
+            self.games_played += 1
+            
+            if won and guess_history:
+                path = {
+                    'target': target_word,
+                    'guesses': [g['word'] for g in guess_history if isinstance(g, dict) and 'word' in g],
+                    'attempts': attempts,
+                    'timestamp': datetime.now().isoformat()
+                }
+                self.successful_paths.append(path)
+                
+                self._analyze_categories(target_word, guess_history)
+            
+            if self.games_played % 10 == 0:
+                self.save_data()
+        
+        except Exception as e:
+            print(f"⚠️ Ошибка обучения на игре: {e}")
+    
+    def _analyze_categories(self, target_word, guess_history):
+        """Анализирует категории слов"""
+        try:
+            related_words = []
+            for g in guess_history:
+                if isinstance(g, dict) and 'word' in g and 'similarity' in g:
+                    if g.get('similarity', 0) > 0.5:
+                        related_words.append(g['word'])
+            
+            if related_words:
+                category_key = target_word
+                
+                if category_key not in self.word_categories:
+                    self.word_categories[category_key] = set()
+                elif not isinstance(self.word_categories[category_key], set):
+                    self.word_categories[category_key] = set(self.word_categories[category_key])
+                
+                self.word_categories[category_key].update(related_words)
+                self.word_categories[category_key].add(target_word)
+        
+        except Exception as e:
+            print(f"⚠️ Ошибка анализа категорий: {e}")
+    
+    def get_learned_similarity(self, word1, word2):
+        """Возвращает выученную похожесть"""
+        word1 = word1.lower()
+        word2 = word2.lower()
+        
+        if word1 in self.word_associations and word2 in self.word_associations[word1]:
+            return self.word_associations[word1][word2]
+        
+        if word2 in self.word_associations and word1 in self.word_associations[word2]:
+            return self.word_associations[word2][word1]
+        
+        for category, words in self.word_categories.items():
+            if word1 in words and word2 in words:
+                return 0.6
+        
+        return 0.0
+    
+    def get_best_associations(self, target_word, top_n=10):
+        """Возвращает лучшие ассоциации"""
+        target_word = target_word.lower()
+        
+        if target_word not in self.word_associations:
             return []
         
-        word_data = self.learning_data["word_associations"][target_word]
-        related_words = word_data["related_words"]
+        associations = self.word_associations[target_word]
+        sorted_assoc = sorted(associations.items(), key=lambda x: x[1], reverse=True)
         
-        # Сортируем по количеству появлений (популярность)
-        suggestions = sorted(
-            [(word, score) for word, score in related_words.items() 
-             if word not in current_guesses],
-            key=lambda x: x[1],
-            reverse=True
-        )
-        
-        return suggestions[:5]  # Топ 5 предложений
+        return sorted_assoc[:top_n]
     
-    def get_word_difficulty(self, word: str) -> float:
-        """Возвращает сложность слова (0.0 - 1.0)"""
-        if word not in self.learning_data["word_associations"]:
-            return 0.5  # Средняя сложность для неизвестных слов
+    def get_hint(self, target_word):
+        """Дает подсказку"""
+        best_assoc = self.get_best_associations(target_word, top_n=5)
         
-        return min(1.0, self.learning_data["word_associations"][word]["difficulty_score"])
-    
-    def get_ai_insight(self) -> Dict:
-        """Возвращает инсайты о том, что AI научилось"""
-        hardest = max(
-            self.learning_data["word_associations"].items(),
-            key=lambda x: x[1]["difficulty_score"],
-            default=("unknown", {"difficulty_score": 0})
-        )
-        
-        easiest = min(
-            self.learning_data["word_associations"].items(),
-            key=lambda x: x[1]["difficulty_score"],
-            default=("unknown", {"difficulty_score": 0})
-        )
-        
-        return {
-            "total_games_analyzed": self.learning_data["games_played"],
-            "average_attempts_per_game": round(self.learning_data["average_attempts"], 2),
-            "hardest_word": hardest[0],
-            "hardest_difficulty": round(hardest[1]["difficulty_score"], 2),
-            "easiest_word": easiest[0],
-            "easiest_difficulty": round(easiest[1]["difficulty_score"], 2),
-            "win_rate": round(self.game_statistics["average_win_rate"] * 100, 1),
-            "total_unique_words": len(self.learning_data["word_associations"])
-        }
-    
-    def _save_learning_data(self):
-        """Сохраняет данные обучения"""
-        try:
-            # Конвертируем defaultdict в обычный dict
-            learning_data_copy = self.learning_data.copy()
-            learning_data_copy["word_associations"] = {
-                word: {
-                    **data,
-                    "related_words": dict(data["related_words"])
-                }
-                for word, data in learning_data_copy["word_associations"].items()
-            }
-            
-            with open(self.learning_file, 'w', encoding='utf-8') as f:
-                json.dump(learning_data_copy, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"Ошибка сохранения данных обучения: {e}")
-    
-    def export_learning_stats(self) -> str:
-        """Экспортирует статистику обучения"""
-        insight = self.get_ai_insight()
-        stats = f"""
-=== AI LEARNING STATISTICS ===
-Всего игр проанализировано: {insight['total_games_analyzed']}
-Среднее попыток на игру: {insight['average_attempts_per_game']}
-Коэффициент побед: {insight['win_rate']}%
-Всего уникальных слов: {insight['total_unique_words']}
-
-Сложнейшее слово: "{insight['hardest_word']}" (сложность: {insight['hardest_difficulty']})
-Легчайшее слово: "{insight['easiest_word']}" (сложность: {insight['easiest_difficulty']})
-===========================
-        """
-        return stats.strip()
+        if best_assoc:
+            return f"Попробуйте слова связанные с: {', '.join([w for w, s in best_assoc[:3]])}"
+        else:
+            return "Подсказок пока нет, но AI учится!"
